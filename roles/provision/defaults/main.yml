@@ -1,0 +1,2 @@
+#Can be overridden to create new VIRL servers
+idempotent_id: ""

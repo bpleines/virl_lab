@@ -1,0 +1,28 @@
+---
+- name: Provision the VIRL Server
+  hosts: localhost
+  connection: local
+  #Gets the home directory for the stored private ssh key
+  gather_facts: yes
+  roles:
+    - { role: provision }
+  
+  post_tasks:
+    - name: Wait for SSH to come up on the VIRL Node
+      delegate_to: "{{ item }}"
+      wait_for_connection:
+        delay: 10
+        timeout: 320
+      with_items: "{{ groups['virl'] }}"
+      tags: control    
+
+- name: Boostrap the VIRL Lab
+  hosts: virl
+  roles:
+    - { role: install }
+
+  post_tasks:
+    - name: Browse to the returned public dns name of the VIRL instance
+      command: open "https://{{ groups['virl'][0] }}"
+      ignore_errors: true
+      delegate_to: localhost

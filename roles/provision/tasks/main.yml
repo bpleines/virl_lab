@@ -1,0 +1,91 @@
+---
+- name: Create key pair using key_material obtained using 'file' lookup plugin
+  ec2_key:
+    #authentication variables vaulted in group_vars/all/vault.yml
+    aws_access_key: "{{ aws_access_key }}" 
+    aws_secret_key: "{{ aws_secret_key }}"
+    region: "{{ region }}"
+    #key info 
+    name: tower_rds
+    key_material: "{{ lookup('file', private_ssh_key | replace('.pem','')  + '.pub') }}"
+  register: key
+  tags: always
+
+- name: "Use ec2_ami_facts to VIRL AMI in {{ region }}" 
+  ec2_ami_facts:
+    #authentication variables vaulted in group_vars/all/vault.yml
+    aws_access_key: "{{ aws_access_key }}" 
+    aws_secret_key: "{{ aws_secret_key }}" 
+    region: "{{ region }}" 
+    filters:
+      name: "CentOS Linux 7 x86_64 HVM EBS ENA 1805_01-b7ee8a69-ee97-4a49-9e68-afaee216db2e-ami-77ec9308.4"
+  register: fetched_image
+  tags: always
+
+- name: "Set the image_id"
+  set_fact:
+    linux_image: "{{ fetched_image.images[0]['image_id'] }}"
+  tags: always 
+
+- name: Create the VIRL Node Security Group
+  ec2_group:
+    #authentication variables vaulted in group_vars/all/vault.yml
+    aws_access_key: "{{ aws_access_key }}"
+    aws_secret_key: "{{ aws_secret_key }}"
+    region: "{{ region }}"
+    vpc_id: "{{ vpc_id }}" 
+    name: virl
+    description: Security group for the VIRL Node
+    rules:
+      - proto: tcp
+        ports:
+          - 22
+        cidr_ip: 0.0.0.0/0
+        rule_desc: allow all on port 22
+      - proto: tcp
+        ports:
+          - 80
+        cidr_ip: 0.0.0.0/0
+        rule_desc: allow http from everywhere
+      - proto: tcp
+        ports:
+          - 443
+        cidr_ip: 0.0.0.0/0
+        rule_desc: allow https on everywhere
+      - proto: icmp
+        from_port: -1
+        to_port: -1
+        cidr_ip: 0.0.0.0/0
+        rule_desc: allow icmp from everywhere
+  register: virl_security
+
+- name: Create the VIRL Node
+  ec2_instance:
+    #authentication variables vaulted in group_vars/all/vault.yml
+    aws_access_key: "{{ aws_access_key }}"
+    aws_secret_key: "{{ aws_secret_key }}"
+    region: "{{ region }}"
+    #Must be defined when using assign_public_ip
+    vpc_subnet_id: "{{ vpc_subnet_id }}"
+    #key pair used in group_vars/all/main.yml
+    key_name: "{{ key_pair }}"
+    #image properties
+    name: virl{{ idempotent_id }}
+    instance_type: t2.2xlarge
+    image_id: "{{ linux_image }}"
+    wait: yes
+    security_group: virl
+    network:
+      assign_public_ip: yes
+    tags:
+      Name: virl{{ idempotent_id }}
+    #Explicitly define state
+    state: present
+  register: virl_node_launched
+
+- name: Add the VIRL Node to an in-memory inventory group
+  add_host:  
+    name: "{{ item.public_dns_name }}" 
+    groups: virl
+  with_items: "{{ virl_node_launched.instances }}"
+...
